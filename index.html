@@ -46,10 +46,13 @@ body.is-loaded { overflow-x:hidden; overflow-y:auto; }
 body.is-loaded #loading-shutter { opacity:0; }
 
 #tree-canvas-container {
-  position:absolute; /* 绝对定位，随页面滚走 */
-  top:0; left:0; width:100%; height:100vh; z-index:3; pointer-events:none;
+  position:absolute; 
+  top:0; left:0; width:100%; height:100vh; 
+  z-index:9999; /* 💡 关键修复：初始层级必须比黑屏高，才能看到它生长！ */
+  pointer-events:none;
 }
 body.is-loaded #tree-canvas-container {
+  z-index:3; /* 💡 关键修复：长完之后，瞬间降级沉底，让出导航栏和文字的点击空间 */
   mask-image: linear-gradient(to bottom, black 0%, black 60%, transparent 95%);
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 60%, transparent 95%);
 }
@@ -294,7 +297,7 @@ gsap.ticker.lagSmoothing(0, 0);
 
     if(this.prog>=1 && !this.spawned && this.depth>0){
       this.spawned=true;
-      let numBranches = (this.depth > 3) ? Math.floor(rnd(2, 3)) : Math.floor(rnd(1.8, 2.5));
+      let numBranches = (this.depth > 3) ? Math.floor(rnd(2, 4.5)) : Math.floor(rnd(2, 3.5));
       let baseAng = Math.atan2(this.y2-this.y1, this.x2-this.x1);
       for(let i=0; i<numBranches; i++){
         let spread = (i / Math.max(1, numBranches - 1) - 0.5) * 1.8 + rnd(-0.15, 0.15); 
@@ -421,13 +424,14 @@ document.getElementById('overlay-close').addEventListener('click', closeOverlay)
 overlay.addEventListener('click', e => { if(e.target===overlay) closeOverlay(); });
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeOverlay(); });
 
-// =========================================
-// 4. GSAP 树枝触碰与 FadeUp 物理动画
+//// =========================================
+// 4. GSAP 树枝触碰与 FadeUp 物理动画 (带生长树叶版)
 // =========================================
 window.addEventListener('load', () => {
   const svg = document.getElementById('scroll-branches-svg');
   const worksSec = document.getElementById('works');
   
+  // 主干
   const trunk = document.createElementNS("http://www.w3.org/2000/svg", "line");
   trunk.setAttribute('x1', '50%'); trunk.setAttribute('y1', '0');
   trunk.setAttribute('x2', '50%'); trunk.setAttribute('y2', '100%');
@@ -445,11 +449,13 @@ window.addEventListener('load', () => {
       const worksRect = worksSec.getBoundingClientRect();
       const cardRect = card.getBoundingClientRect();
       
+      // 树枝起止点
       const startX = worksRect.width / 2;
       const startY = (cardRect.top - worksRect.top) - 100;
       const endX = isLeft ? (cardRect.right - worksRect.left) : (cardRect.left - worksRect.left);
       const endY = (cardRect.top - worksRect.top) + (cardRect.height / 3);
 
+      // 画枝干 (二次贝塞尔曲线)
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       const d = `M ${startX} ${startY} Q ${startX} ${endY} ${endX} ${endY}`;
       path.setAttribute('d', d); path.setAttribute('stroke', color);
@@ -460,11 +466,56 @@ window.addEventListener('load', () => {
       path.setAttribute('stroke-dashoffset', pathLength);
       svg.appendChild(path);
 
+      // 🌟 核心：在树枝上种下 3 片树叶
+      const leaves = [];
+      for(let j=1; j<=3; j++) {
+        let t = 0.5 + (j * 0.15); // 让树叶分布在枝条中后段 (进度 0.65, 0.8, 0.95 的位置)
+        let u = 1 - t;
+        
+        // 用贝塞尔公式算出树叶的具体 X, Y 坐标
+        let lx = u*u*startX + 2*u*t*startX + t*t*endX;
+        let ly = u*u*startY + 2*u*t*endY + t*t*endY;
+        
+        // 计算枝干在这个点的切线角度，让树叶顺着枝干方向长
+        let tangX = 2*t*(endX - startX);
+        let tangY = 2*(1-t)*(endY - startY);
+        let angle = Math.atan2(tangY, tangX) * (180 / Math.PI) + (isLeft ? -30 : 30); // 稍微偏转一点角度更好看
+
+        // 创建 SVG 树叶 (柳叶形状)
+        const leaf = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        leaf.setAttribute('d', 'M0,0 Q6,-5 14,0 Q6,5 0,0'); // 14是叶子长度
+        leaf.setAttribute('fill', color);
+        leaf.setAttribute('filter', 'url(#glow)');
+        
+        // 初始状态：缩小为0，透明，准备好位置和角度
+        gsap.set(leaf, { transformOrigin: "0 0", x: lx, y: ly, rotation: angle, scale: 0, opacity: 0 });
+        svg.appendChild(leaf);
+        leaves.push({ el: leaf, t: t, shown: false });
+      }
+
+      // 树枝随滚动生长，同时触发树叶弹出
       ScrollTrigger.create({
         trigger: card, start: "top 90%", end: "top 60%", scrub: 1,
-        onUpdate: (self) => { path.setAttribute('stroke-dashoffset', pathLength * (1 - self.progress)); }
+        onUpdate: (self) => { 
+          // 控制枝干生长
+          path.setAttribute('stroke-dashoffset', pathLength * (1 - self.progress)); 
+          
+          // 控制树叶弹出
+          leaves.forEach(leafObj => {
+            if (self.progress >= leafObj.t && !leafObj.shown) {
+              leafObj.shown = true;
+              // 物理弹性放大
+              gsap.to(leafObj.el, { scale: 1, opacity: 0.9, duration: 0.5, ease: "back.out(2)" });
+            } else if (self.progress < leafObj.t && leafObj.shown) {
+              leafObj.shown = false;
+              // 往回滚时缩回去
+              gsap.to(leafObj.el, { scale: 0, opacity: 0, duration: 0.3 });
+            }
+          });
+        }
       });
 
+      // 树枝触碰瞬间，触发卡片 FadeUp
       ScrollTrigger.create({
         trigger: card, start: "top 60%",
         onEnter: () => { gsap.to(innerCard, { y: 0, opacity: 1, duration: 1.2, ease: "power4.out" }); }
