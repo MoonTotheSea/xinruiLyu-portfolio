@@ -20,21 +20,15 @@ body{color:var(--text);font-family:'Cormorant Garamond',Georgia,serif;cursor:non
 body.is-loaded { overflow-x:hidden; overflow-y:auto; }
 
 /* =========================================
-   2. 沉浸式背景：视频层完全清晰，保留光晕
+   2. 沉浸式背景：视频层与光学呼吸光晕
 ========================================= */
-#bg-video {
-  position:fixed; inset:0; width:100vw; height:100vh; object-fit:cover; z-index:0; pointer-events:none;
-}
-/* 移除了 blur，只留一层透明黑膜压暗背景，让文字更清晰 */
-#bg-overlay {
-  position:fixed; inset:0; z-index:1; background:rgba(7,5,16,0.5); pointer-events:none;
-}
+#bg-video { position:fixed; inset:0; width:100vw; height:100vh; object-fit:cover; z-index:0; pointer-events:none; }
+#bg-overlay { position:fixed; inset:0; z-index:1; background:rgba(7,5,16,0.5); pointer-events:none; }
 #breathing-glow {
   position:fixed; top:50%; left:50%; transform:translate(-50%, -50%);
   width:90vw; height:90vw; border-radius:50%;
   background:radial-gradient(circle, rgba(168,128,232,0.18) 0%, rgba(109,184,232,0.12) 35%, transparent 65%);
-  mix-blend-mode:color-dodge;
-  pointer-events:none; z-index:2;
+  mix-blend-mode:color-dodge; pointer-events:none; z-index:2;
   animation:breathe 10s ease-in-out infinite alternate;
 }
 @keyframes breathe {
@@ -43,7 +37,7 @@ body.is-loaded { overflow-x:hidden; overflow-y:auto; }
 }
 
 /* =========================================
-   3. Loading 转场：保留完整的树
+   3. Loading 转场遮罩 & 随动 Canvas 树
 ========================================= */
 #loading-shutter {
   position:fixed; inset:0; background:#0a0614; z-index:9998;
@@ -52,10 +46,9 @@ body.is-loaded { overflow-x:hidden; overflow-y:auto; }
 body.is-loaded #loading-shutter { opacity:0; }
 
 #tree-canvas-container {
-  position:fixed; inset:0; z-index:3; pointer-events:none;
-  transition: opacity 1.5s ease;
+  position:absolute; /* 绝对定位，随页面滚走 */
+  top:0; left:0; width:100%; height:100vh; z-index:3; pointer-events:none;
 }
-/* 转场核心：加载完后，树根部渐渐透明，融入深色背景 */
 body.is-loaded #tree-canvas-container {
   mask-image: linear-gradient(to bottom, black 0%, black 60%, transparent 95%);
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 60%, transparent 95%);
@@ -108,12 +101,9 @@ body.is-loaded .hero-scroll { animation:fadeUp 1s ease 1s forwards; }
 
 .projects-grid{position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:100px;}
 .project-card{position:relative;cursor:none; background:transparent;}
-/* 生死分区：右侧整体下沉，形成错落 */
 .project-card.card-right { margin-top: 140px; } 
 
-/* 初始隐藏，等待 GSAP 触碰触发 */
 .project-card-inner { opacity:0; transform:translateY(80px); }
-
 .project-cover{width:100%;aspect-ratio:4/3;overflow:hidden; position:relative;}
 .project-cover img{width:100%;height:100%;object-fit:cover;display:block;transition:transform 1s cubic-bezier(.16,1,.3,1);filter:saturate(0.7);}
 .project-card:hover .project-cover img{transform:scale(1.05);filter:saturate(1);}
@@ -124,7 +114,9 @@ body.is-loaded .hero-scroll { animation:fadeUp 1s ease 1s forwards; }
 .card-right:hover .project-title{color:var(--blue);}
 .project-year{font-family:'Geist Mono',monospace;font-size:.6rem;letter-spacing:.1em;color:var(--muted);}
 
-/* 作品详情 Overlay */
+/* =========================================
+   6. Overlay 详情页
+========================================= */
 #overlay{position:fixed;inset:0;z-index:400;background:rgba(6,4,14,.96);opacity:0;pointer-events:none;transition:opacity .45s ease;overflow-y:auto;}
 #overlay.open{opacity:1;pointer-events:all;}
 .overlay-inner{max-width:1100px;margin:0 auto;padding:80px 56px 120px;}
@@ -142,7 +134,7 @@ body.is-loaded .hero-scroll { animation:fadeUp 1s ease 1s forwards; }
 .gallery-img.wide{grid-column:span 2;}
 
 /* =========================================
-   6. 其他区域 (About & Contact)
+   7. About & Contact
 ========================================= */
 #about{position:relative;z-index:10;padding:160px 10vw;background:rgba(7,5,16,.6);backdrop-filter:blur(12px);border-top:1px solid var(--border);}
 .about-grid{display:grid;grid-template-columns:1fr 1fr;gap:100px;align-items:center;}
@@ -185,7 +177,6 @@ footer p{font-family:'Geist Mono',monospace;font-size:.6rem;letter-spacing:.1em;
 
 <div id="cursor"></div>
 <div id="cursor-ring"></div>
-
 <div class="cinematic-signature"><span>Xinrui</span> Lyu</div>
 
 <div id="overlay">
@@ -262,67 +253,111 @@ gsap.ticker.add((time) => { lenis.raf(time * 1000); });
 gsap.ticker.lagSmoothing(0, 0);
 
 // =========================================
-// 2. 新版 Canvas 树逻辑 (保留并遮罩)
+// 2. 性能安全版 Canvas 树逻辑 (附带树叶，防崩溃版)
 // =========================================
 (function initTree() {
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
   let W, H, OX, OY, branches = [], frame = 0, isLoadingActive = true;
   
-  function setSize(){ W=cv.width=window.innerWidth; H=cv.height=window.innerHeight; OX=W/2; OY=H*0.7; }
-  setSize(); window.addEventListener('resize', setSize);
+  function setSize(){ W=cv.width=window.innerWidth; H=cv.height=window.innerHeight; OX=W/2; OY=H*0.55; }
+  setSize(); 
   function rnd(a,b){ return a+Math.random()*(b-a); }
 
   function Branch(x1,y1,x2,y2,w,depth,delay,side){
     this.x1=x1; this.y1=y1; this.x2=x2; this.y2=y2; this.w=w; this.depth=depth; this.delay=delay;
     this.prog=0; this.spawned=false; this.children=[];
     let dx=x2-x1, dy=y2-y1, ang=Math.atan2(dy,dx), perp=ang+Math.PI/2;
-    let amt = depth > 3 ? rnd(15,25) : rnd(5,15);
+    let amt = depth > 3 ? rnd(10,20) : rnd(5,15);
     this.cpx=(x1+x2)/2+Math.cos(perp)*amt*(side||(Math.random()>0.5?1:-1));
     this.cpy=(y1+y2)/2+Math.sin(perp)*amt*(side||(Math.random()>0.5?1:-1));
-    this.color = side === -1 ? 'rgba(168,128,232,0.8)' : side === 1 ? 'rgba(109,184,232,0.8)' : 'rgba(180,160,255,0.9)';
-  }
-  Branch.prototype.draw = function(f){
-    if(f<this.delay) return;
-    this.prog = Math.min(1, (f-this.delay)/40);
-    if(this.prog>=1 && !this.spawned && this.depth>0){
-      this.spawned=true;
-      for(let i=0;i<2;i++){
-        let a = Math.atan2(this.y2-this.y1, this.x2-this.x1) + (i===0?-0.4:0.4) + rnd(-0.1,0.1);
-        let l = Math.sqrt((this.x2-this.x1)**2+(this.y2-this.y1)**2)*0.75;
-        this.children.push(new Branch(this.x2,this.y2,this.x2+Math.cos(a)*l,this.y2+Math.sin(a)*l,this.w*0.6,this.depth-1,f+5,this.x2<OX?-1:1));
+    this.color = side === -1 ? 'rgba(168,128,232,0.85)' : side === 1 ? 'rgba(109,184,232,0.85)' : 'rgba(180,160,255,0.9)';
+
+    this.leaves = [];
+    if (this.depth <= 2) {
+      let numLeaves = Math.floor(rnd(3, 6)); 
+      for(let i=0; i<numLeaves; i++) {
+        this.leaves.push({
+          t: rnd(0.2, 0.9), size: rnd(3, 6) + (2 - this.depth)*1.5, ang: ang + rnd(-1.2, 1.2), 
+          color: side === -1 ? `rgba(${Math.floor(rnd(180,230))}, 140, 255, 0.95)` : `rgba(${Math.floor(rnd(120,160))}, 230, 255, 0.95)`
+        });
       }
     }
-    let t = this.prog, u=1-t, p={x:u*u*this.x1+2*u*t*this.cpx+t*t*this.x2, y:u*u*this.y1+2*u*t*this.cpy+t*t*this.y2};
-    ctx.beginPath(); ctx.strokeStyle=this.color; ctx.lineWidth=this.w; ctx.moveTo(this.x1,this.y1); ctx.quadraticCurveTo(this.cpx,this.cpy,p.x,p.y); ctx.stroke();
+  }
+
+  Branch.prototype.pt = function(t){
+    let u=1-t; return {x:u*u*this.x1+2*u*t*this.cpx+t*t*this.x2, y:u*u*this.y1+2*u*t*this.cpy+t*t*this.y2};
+  };
+
+  Branch.prototype.draw = function(f){
+    if(f<this.delay) return;
+    this.prog = Math.min(1, (f-this.delay)/30); 
+
+    if(this.prog>=1 && !this.spawned && this.depth>0){
+      this.spawned=true;
+      let numBranches = (this.depth > 3) ? Math.floor(rnd(2, 3)) : Math.floor(rnd(1.8, 2.5));
+      let baseAng = Math.atan2(this.y2-this.y1, this.x2-this.x1);
+      for(let i=0; i<numBranches; i++){
+        let spread = (i / Math.max(1, numBranches - 1) - 0.5) * 1.8 + rnd(-0.15, 0.15); 
+        let a = baseAng + spread;
+        let lenMult = this.depth > 3 ? rnd(0.65, 0.8) : rnd(0.55, 0.75);
+        let l = Math.sqrt((this.x2-this.x1)**2+(this.y2-this.y1)**2) * lenMult;
+        this.children.push(new Branch(this.x2,this.y2,this.x2+Math.cos(a)*l,this.y2+Math.sin(a)*l,this.w*0.7,this.depth-1,f+2,this.x2<OX?-1:1));
+      }
+    }
+
+    let t = this.prog, p=this.pt(t);
+    ctx.beginPath(); ctx.strokeStyle=this.color; ctx.lineWidth=this.w; 
+    ctx.moveTo(this.x1,this.y1); ctx.quadraticCurveTo(this.cpx,this.cpy,p.x,p.y); ctx.stroke();
+
+    if(this.leaves.length > 0) {
+      for(let i=0; i<this.leaves.length; i++){
+        let leaf = this.leaves[i];
+        if (this.prog >= leaf.t) { 
+          let lp = this.pt(leaf.t);
+          let leafProg = Math.min(1, (this.prog - leaf.t) / (1.05 - leaf.t)); 
+          ctx.save(); ctx.translate(lp.x, lp.y); ctx.rotate(leaf.ang); ctx.scale(leafProg, leafProg); 
+          ctx.fillStyle = leaf.color; ctx.beginPath(); ctx.moveTo(0,0);
+          ctx.quadraticCurveTo(leaf.size, leaf.size/1.5, leaf.size*2.5, 0);
+          ctx.quadraticCurveTo(leaf.size, -leaf.size/1.5, 0, 0);
+          ctx.fill(); ctx.restore();
+        }
+      }
+    }
     this.children.forEach(c => c.draw(f));
   };
 
   function build(){
-    let segH=H*0.12;
-    let b1 = new Branch(OX,OY,OX,OY-segH,12,0,0,0);
-    let b2 = new Branch(OX,OY-segH,OX,OY-segH*2,9,5,30,0);
+    let segH=H*0.14;
+    let b1 = new Branch(OX,OY+60,OX,OY-segH+60,12,0,0,0);
+    let b2 = new Branch(OX,OY-segH+60,OX,OY-segH*2.2+60,10, 5, 20, 0); // 性能控制在 depth: 5
     b1.spawned=true; b1.children=[b2]; branches=[b1];
   }
 
   function finishLoading() {
     if(!isLoadingActive) return;
     isLoadingActive = false;
-    document.body.classList.add('is-loaded'); // 触发渐变遮罩和文字显现
+    document.body.classList.add('is-loaded'); 
   }
   document.getElementById('skip-btn').addEventListener('click', finishLoading);
 
-  function loop(){
-    // 加载完成后，树不再重新生长，只是保持渲染状态
+  // 窗口缩放时重绘静态树，防止消失
+  window.addEventListener('resize', () => {
+    setSize();
     if(!isLoadingActive) {
       ctx.clearRect(0,0,W,H);
-      branches.forEach(b => b.draw(frame));
-      requestAnimationFrame(loop);
-      return;
+      branches.forEach(b => b.draw(250)); // 直接画最终状态
     }
+  });
+
+  function loop(){
+    // 🌟 核心：动画跑完直接终止循环，不卡显卡！
+    if(!isLoadingActive) return; 
+    
     ctx.clearRect(0,0,W,H);
     branches.forEach(b => b.draw(frame));
     frame++;
-    if(frame === 180) finishLoading();
+    
+    if(frame === 230) finishLoading();
     requestAnimationFrame(loop);
   }
   build(); loop();
@@ -393,7 +428,6 @@ window.addEventListener('load', () => {
   const svg = document.getElementById('scroll-branches-svg');
   const worksSec = document.getElementById('works');
   
-  // 主干
   const trunk = document.createElementNS("http://www.w3.org/2000/svg", "line");
   trunk.setAttribute('x1', '50%'); trunk.setAttribute('y1', '0');
   trunk.setAttribute('x2', '50%'); trunk.setAttribute('y2', '100%');
@@ -404,10 +438,9 @@ window.addEventListener('load', () => {
   
   cards.forEach((card) => {
     const isLeft = card.classList.contains('card-left');
-    const color = isLeft ? '#a880e8' : '#6db8e8'; // 左紫右蓝
+    const color = isLeft ? '#a880e8' : '#6db8e8'; 
     const innerCard = card.querySelector('.project-card-inner');
     
-    // 等待 DOM 渲染后计算卡片坐标
     setTimeout(() => {
       const worksRect = worksSec.getBoundingClientRect();
       const cardRect = card.getBoundingClientRect();
@@ -427,13 +460,11 @@ window.addEventListener('load', () => {
       path.setAttribute('stroke-dashoffset', pathLength);
       svg.appendChild(path);
 
-      // 树枝随滚动生长
       ScrollTrigger.create({
         trigger: card, start: "top 90%", end: "top 60%", scrub: 1,
         onUpdate: (self) => { path.setAttribute('stroke-dashoffset', pathLength * (1 - self.progress)); }
       });
 
-      // 树枝触碰瞬间，触发卡片 FadeUp
       ScrollTrigger.create({
         trigger: card, start: "top 60%",
         onEnter: () => { gsap.to(innerCard, { y: 0, opacity: 1, duration: 1.2, ease: "power4.out" }); }
